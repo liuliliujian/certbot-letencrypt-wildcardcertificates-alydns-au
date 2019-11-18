@@ -3,12 +3,12 @@
 import base64
 import urllib
 import hmac
-import pytz
 import datetime
 import random
 import string
 import json
 import sys
+import os 
 
 pv = "python2"
 #python2
@@ -18,12 +18,9 @@ if sys.version_info[0] < 3:
     import hashlib
 else:
     from urllib.parse import quote
-    from urllib.parse import urlencode 
+    from urllib.parse import urlencode
     from urllib import request
     pv = "python3"
-
-ACCESS_KEY_ID = 'access_key_id'
-ACCESS_KEY_SECRET = 'access_key_secret'
 
 
 class AliDns:
@@ -31,6 +28,27 @@ class AliDns:
         self.access_key_id = access_key_id
         self.access_key_secret = access_key_secret
         self.domain_name = domain_name
+
+    @staticmethod
+    def getDomain(domain):
+        domain_parts = domain.split('.')
+ 
+        
+        if len(domain_parts) > 2:
+            dirpath = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+            domainfile = dirpath + "/domain.ini"
+            domainarr = []
+            with open(domainfile) as f:
+                for line in f:
+                    val = line.strip()
+                    domainarr.append(val)
+
+            #rootdomain = '.'.join(domain_parts[-(2 if domain_parts[-1] in {"co.jp", "com.tw", "net", "com", "com.cn", "org", "cn", "gov", "net.cn", "io", "top", "me", "int", "edu", "link"} else 3):])
+            rootdomain = '.'.join(domain_parts[-(2 if domain_parts[-1] in
+                                                 domainarr else 3):])
+            selfdomain = domain.split(rootdomain)[0]
+            return (selfdomain[0:len(selfdomain)-1], rootdomain)
+        return ("", domain)
 
     @staticmethod
     def generate_random_str(length=14):
@@ -58,8 +76,10 @@ class AliDns:
         例如，2015-01-09T12:00:00Z（为UTC时间2015年1月9日12点0分0秒）
         :return:
         """
-        utc_tz = pytz.timezone('UTC')
-        time = datetime.datetime.now(tz=utc_tz).strftime('%Y-%m-%dT%H:%M:%SZ')
+        #utc_tz = pytz.timezone('UTC')
+        #time = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        #time = datetime.datetime.now(tz=utc_tz).strftime('%Y-%m-%dT%H:%M:%SZ')
+        time = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
         return time
 
     @staticmethod
@@ -69,18 +89,19 @@ class AliDns:
         can_string = ''
         for k, v in sorted_url_param:
             can_string += '&' + percent_encode(k) + '=' + percent_encode(v)
-        string_to_sign = 'GET' + '&' + '%2F' + '&' + percent_encode(can_string[1:])
+        string_to_sign = 'GET' + '&' + '%2F' + \
+            '&' + percent_encode(can_string[1:])
         return string_to_sign
 
     @staticmethod
     def access_url(url):
-        if pv == "python2" :
+        if pv == "python2":
             f = urllib.urlopen(url)
             result = f.read().decode('utf-8')
             #print(result)
             return json.loads(result)
-        else :
-            req = request.Request(url) 
+        else:
+            req = request.Request(url)
             with request.urlopen(req) as f:
                 result = f.read().decode('utf-8')
                 #print(result)
@@ -103,10 +124,22 @@ class AliDns:
         hash_bytes = self.access_key_secret + "&"
         if pv == "python2":
             h = hmac.new(hash_bytes, string_to_sign, digestmod=hashlib.sha1)
-        else :
-            h = hmac.new(hash_bytes.encode('utf-8'), string_to_sign.encode('utf-8'), digestmod='SHA1')
-        
-        signature = base64.encodestring(h.digest()).strip()
+        else:
+            # Return a new hmac object
+            # key is a bytes or bytearray object giving the secret key
+            # Parameter msg can be of any type supported by hashlib
+            # Parameter digestmod can be the name of a hash algorithm.(字符串)
+            h = hmac.new(hash_bytes.encode('utf-8'),
+                         string_to_sign.encode('utf-8'), digestmod='SHA1')
+
+        if pv == "python2":
+            signature = base64.encodestring(h.digest()).strip()
+        else:
+            # digest() 返回摘要，= HMAC(key, msg, digest).digest()
+            # encodestring Deprecated since version 3.1
+            # encodebytes() Encode the bytes-like object s,which can contain arbitrary binary data, and return bytes containing the base64-encoded data
+            signature = base64.encodebytes(h.digest()).strip()
+
         url_param.setdefault('Signature', signature)
         url = 'https://alidns.aliyuncs.com/?' + urlencode(url_param)
         #print(url)
@@ -162,12 +195,12 @@ class AliDns:
 
 
 if __name__ == '__main__':
-    # domain = AliDns(ACCESS_KEY_ID, ACCESS_KEY_SECRET, 'simplehttps.com')
-    # domain.describe_domain_records()
-    # 增加记录
-    # domain.add_domain_record("TXT", "test", "test")
+    #filename,ACCESS_KEY_ID, ACCESS_KEY_SECRET = sys.argv
+    #domain = AliDns(ACCESS_KEY_ID, ACCESS_KEY_SECRET, 'simplehttps.com')
+    #domain.describe_domain_records()
+    #增加记录
+    #print(domain.add_domain_record("TXT", "test", "test"))
 
-   
     # 修改解析
     #domain.update_domain_record('4011918010876928', 'TXT', 'test2', 'text2')
     # 删除解析记录
@@ -177,16 +210,44 @@ if __name__ == '__main__':
     #	if 'test' in item['RR']:
     #		domain.delete_domain_record(item['RecordId'])
 
-   
-    #print(sys.argv)
-    file_name, certbot_domain, acme_challenge, certbot_validation = sys.argv
+	# 第一个参数是 action，代表 (add/clean)
+	# 第二个参数是域名
+	# 第三个参数是主机名（第三个参数+第二个参数组合起来就是要添加的 TXT 记录）
+	# 第四个参数是 TXT 记录值
+	# 第五个参数是 APPKEY
+	# 第六个参数是 APPTOKEN
+    #sys.exit(0)
 
-    domain = AliDns(ACCESS_KEY_ID, ACCESS_KEY_SECRET, certbot_domain)
-    data = domain.describe_domain_records()
-    record_list = data["DomainRecords"]["Record"]
-    if record_list:
-        for item in record_list:
-            if acme_challenge == item['RR']:
-                domain.delete_domain_record(item['RecordId'])
+    print("域名 API 调用开始")
+    print("-".join(sys.argv))
+    file_name, cmd, certbot_domain, acme_challenge, certbot_validation, ACCESS_KEY_ID, ACCESS_KEY_SECRET = sys.argv
 
-    domain.add_domain_record("TXT", acme_challenge, certbot_validation)
+    certbot_domain = AliDns.getDomain(certbot_domain)
+    #print (certbot_domain)
+    if certbot_domain[0] == "":
+            selfdomain = acme_challenge
+    else:
+            selfdomain = acme_challenge + "." + certbot_domain[0]
+
+    domain = AliDns(ACCESS_KEY_ID, ACCESS_KEY_SECRET, certbot_domain[1])
+
+    if cmd == "add":
+        result = (domain.add_domain_record(
+            "TXT", selfdomain, certbot_validation))
+        if "Code" in result:
+            print("aly dns 域名增加失败-" +
+                  str(result["Code"]) + ":" + str(result["Message"]))
+            sys.exit(0)
+    elif cmd == "clean":
+        data = domain.describe_domain_records()
+        if "Code" in data:
+            print("aly dns 域名删除失败-" +
+                  str(data["Code"]) + ":" + str(data["Message"]))
+            sys.exit(0)
+        record_list = data["DomainRecords"]["Record"]
+        if record_list:
+            for item in record_list:
+                if (item['RR'] == selfdomain):
+                    domain.delete_domain_record(item['RecordId'])
+
+print("域名 API 调用结束")

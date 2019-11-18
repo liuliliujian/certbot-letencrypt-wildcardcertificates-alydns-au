@@ -1,58 +1,92 @@
 <?php
-
 date_default_timezone_set("GMT");
 
-############ 请在腾讯云申请“API密钥”，替换下面两个常量
-//去 https://console.cloud.tencent.com/cam/capi 页面申请 
-define("txyaccessKeyId", "");
-define("txyaccessSecrec", "");
+$dir = dirname(dirname(__FILE__));
+#根域名列表文件，如果自己的根域名不存在该文件中，可自行添加
+$domainfile = $dir . DIRECTORY_SEPARATOR . "domain.ini";
 
-######### 类测试
 /*
-  $obj = new TxyDns(txyaccessKeyId, txyaccessSecrec, "yudadan.com");
+  $obj = new TxyDns(txyaccessKeyId, APPKEY, APPTOKEN);
   //显示所有域名
-  //$obj->DomainList();
-  //添加域名 TXT 记录
-  $obj->RecordCreate("www3","TXT","s");
-  //显示某个域名所有的 TXT 记录
+  $data = $obj->DomainList();
+  if ($data["code"]!=0) {
+  echo $data["message"] . "\n";
+  }
+  //可以增加同名的二条
+  $data = $obj->RecordCreate("www3","TXT",rand(10,1000));
+  $data = $obj->RecordCreate("www3","TXT",rand(10,1000));
+  $data = $obj->RecordCreate("www3.www3","TXT",rand(10,1000));
+
+  if ($data["code"]!=0) {
+  echo $data["message"] . "\n";
+  }
+
+  //查看一个主机的所有txt 记录
+  $data = $obj->RecordList("www3.www3","TXT");
+
   $data = $obj->RecordList("www3","TXT");
-
-*/
-
+  $records = $data["data"]["records"];
+  foreach ($records as $k=>$v) {
+  //根据ID修改记录
+  $data = $obj->RecordModify("www3", "TXT", rand(1000,2000), $v["id"]);
+  //根据ID删除记录
+  $obj->RecordDelete($v["id"]);
+  }
+ */
 
 ###### 代码运行
-// php txydns.php  "simplehttps.com" "txtname" "txtvalue"  
-//$argv[1] = "simplehttps.com";
-//$argv[2] = "www3";
-//$argv[3] = "ssssss";
+//php txydns.php add "www.yudadan.com" "k1" "v1"  AKIDwlPr7DUpLgpZBb4tlT0MWUHtIVXOJwxm mMkxzoTxOirrfJlFYfbS7g7792jEi5GG
+# 第一个参数是 action，代表 (add/clean) 
+# 第二个参数是域名 
+# 第三个参数是主机名（第三个参数+第二个参数组合起来就是要添加的 TXT 记录）
+# 第四个参数是 TXT 记录值
+# 第五个参数是 APPKEY
+# 第六个参数是 APPTOKEN
 
-$domainarray = TxyDns::getDomain($argv[1]);
-$selfdomain = ($domainarray[0]=="")?$argv[2]:$argv[2] . "." . $domainarray[0];
+echo "域名 API 调用开始\n";
 
-//为了匹配出二级域名，以及正确的RR
-$obj = new TxyDns(txyaccessKeyId, txyaccessSecrec, $domainarray[1]);
-$data = $obj->RecordList($selfdomain , "TXT");
-if ($data["code"] != "0") {
-	$obj->error($data["code"], $data["message"]);
+
+if (count($argv) < 7) {
+    echo "参数有误\n";
+    exit;
 }
-$records = $data["data"]["records"];
-foreach ($records as $k => $v) {
-    // 如果存在记录，则直接修改。
-    if ($v["name"] == $selfdomain) {
-        $data = $obj->RecordModify($selfdomain, "TXT", $argv[3], $v["id"]);
-        if ($data["code"] != "0") {
-            $obj->error($data["code"], $data["message"]);
+
+echo $argv[1] . "-" . $argv[2] . "-" . $argv[3] . "-" . $argv[4] . "-" . $argv[5] . "-" . $argv[6] . "\n";
+
+$domainarray = TxyDns::getDomain($argv[2]);
+$selfdomain = ($domainarray[0] == "") ? $argv[3] : $argv[3] . "." . $domainarray[0];
+$obj = new TxyDns($argv[5], $argv[6], $domainarray[1]);
+
+switch ($argv[1]) {
+    case "clean":
+        $data = $obj->RecordList($selfdomain, "TXT");
+        if ($data["code"] != 0) {
+            echo "txy dns 记录获取失败-" . $data["message"] . "\n";
+            exit;
         }
-        //$obj->RecordDelete($v["id"]);
-        exit;
-    }
+        $records = $data["data"]["records"];
+        foreach ($records as $k => $v) {
+
+            $data = $obj->RecordDelete($v["id"]);
+
+            if ($data["code"] != 0) {
+                echo "txy dns 记录删除失败-" . $data["message"] . "\n";
+                exit;
+            }
+        }
+
+        break;
+
+    case "add":
+        $data = $obj->RecordCreate($selfdomain, "TXT", $argv[4]);
+        if ($data["code"] != 0) {
+            echo "txy dns 记录添加失败-" . $data["message"] . "\n";
+            exit;
+        }
+        break;
 }
-//如果不存在，就增加 TXT 记录
-$data = $obj->RecordCreate($selfdomain, "TXT", $argv[3]);
-if ($data["code"] != "0") {
-    //失败，则记录日志
-    $obj->error($data["code"], $data["message"]);
-}
+
+echo "域名 API 调用成功结束\n";
 
 ####### 基于腾讯云 DNS API 实现的 PHP 类，参考 https://cloud.tencent.com/document/product/302/4032
 
@@ -69,59 +103,48 @@ class TxyDns {
         $this->accessSecrec = $accessSecrec;
         $this->DomainName = $domain;
     }
-    
-    /*
-	根据域名返回主机名和二级域名
-    */
-    public static function getDomain($domain) {
-	
-	//常见根域名 【https://en.wikipedia.org/wiki/List_of_Internet_top-level_domains】
-    // 【http://www.seobythesea.com/2006/01/googles-most-popular-and-least-popular-top-level-domains/】
-	
-    $arr[]=".uk";
-    $arr[]=".hk";
-	$arr[]=".net";
-	$arr[]=".com";
-    $arr[]=".edu";
-    $arr[]=".mil";
-	$arr[]=".com.cn";
-	$arr[]=".org";
-	$arr[]=".cn";
-	$arr[]=".gov";
-	$arr[]=".net.cn";
-	$arr[]=".io";
-    $arr[]=".co.jp";
-    $arr[]=".com.tw";
-    $arr[]=".info";
-        $arr[]=".io";
-        $arr[]=".top";
-        $arr[]=".me";
-        $arr[]=".int";
-        $arr[]=".edu";
-	//二级域名
-	$seconddomain ="";
-	//子域名
-	$selfdomain = "";
-	//根域名
-	$rootdomain = "";
-	foreach ($arr as $k=>$v) {
-        	$pos = stripos($domain,$v);
-        	if ($pos) {
-                	$rootdomain = substr($domain,$pos);
-                	$s = explode(".",substr($domain,0,$pos));
-                	$seconddomain =  $s[count($s)-1] . $rootdomain;
-                	for ($i=0;$i<count($s)-1;$i++)
-                        	$selfdomain .= $s[$i];
-                	break;
-        	}	
-	}
-	//echo $seconddomain ;exit;
-	if ($rootdomain=="") {
-        	$seconddomain = $domain;
-        	$selfdomain = "";
-	}
-	return array($selfdomain,$seconddomain);
 
+    /*
+      根据域名返回主机名和二级域名
+     */
+
+    public static function getDomain($domain) {
+
+        //常见根域名 【https://en.wikipedia.org/wiki/List_of_Internet_top-level_domains】
+        // 【http://www.seobythesea.com/2006/01/googles-most-popular-and-least-popular-top-level-domains/】
+	global $domainfile;
+	$tmp = file($domainfile);
+	$arr = array();
+	foreach ($tmp as $k=>$v) {
+		$v = trim($v);
+		if ($v!="")
+			$arr[]= "." . $v;
+	}
+
+        //二级域名
+        $seconddomain = "";
+        //子域名
+        $selfdomain = "";
+        //根域名
+        $rootdomain = "";
+        foreach ($arr as $k => $v) {
+            $pos = stripos($domain, $v);
+            if ($pos) {
+                $rootdomain = substr($domain, $pos);
+                $s = explode(".", substr($domain, 0, $pos));
+                $seconddomain = $s[count($s) - 1] . $rootdomain;
+                for ($i = 0; $i < count($s) - 1; $i++)
+                    $selfdomain .= $s[$i] . ".";
+		$selfdomain = substr($selfdomain,0,strlen($selfdomain)-1);
+		break;
+            }
+        }
+        //echo $seconddomain ;exit;
+        if ($rootdomain == "") {
+            $seconddomain = $domain;
+            $selfdomain = "";
+        }
+        return array($selfdomain, $seconddomain);
     }
 
     public function error($code, $str) {
@@ -203,7 +226,7 @@ class TxyDns {
 
 //签名
     private function formatSignString($host, $path, $param, $requestMethod) {
-        $tmpParam = [];
+        $tmpParam = array();
         ksort($param);
         foreach ($param as $key => $value) {
             array_push($tmpParam, str_replace("_", ".", $key) . "=" . $value);
